@@ -1,26 +1,27 @@
-import uuid
-import hashlib
+import json
 import requests
 import urllib.parse
 import datetime
-import json
+import uuid
+import hashlib
+import os
 from dateutil.parser import parse
 
+#
 class Review:
-    
     def __init__(self, author, date, hours, content, comments, source, helpful, funny, recommend, franchise, gameName):
-        self.id = self.generate_id(gameName, content, author) # Generate Unique ID
-        self.author = str(uuid.uuid5(uuid.NAMESPACE_DNS, author)) # UUID
-        self.date = date
-        self.hours = hours
-        self.content = content
-        self.comments = comments
-        self.source = source
-        self.helpful = helpful
-        self.funny = funny
-        self.recommend = recommend
-        self.franchise = franchise
-        self.gameName = gameName
+        self.id = self.generate_id(gameName, content, author) # Unique reproducible review ID
+        self.author = str(uuid.uuid5(uuid.NAMESPACE_DNS, author)) # UUID of author steam ID
+        self.date = date # 
+        self.hours = hours #
+        self.content = content #
+        self.comments = comments #
+        self.source = source #
+        self.helpful = helpful #
+        self.funny = funny #
+        self.recommend = recommend #
+        self.franchise = franchise #
+        self.gameName = gameName #
         
     def generate_id(self, gameName, content, author):
         # Combine review fields and normalise
@@ -34,11 +35,8 @@ class Review:
 
 # Crawls the apps steam site to fetch reviews and app information
 def fetch_app_data(app_id, date_filters):
-    found = 0
-    reviews = []
-    cursor = "*"
-    print("\nFetching Reviews... (this may take a few seconds)")
-    if date_filters == None:
+    found = 0; reviews = []; cursor = "*"; print("\nFetching Reviews... (this may take a few seconds)")
+    if date_filters == [None, None]:
         for i in range(50):
             url = f"https://store.steampowered.com/appreviews/{app_id}?json=1&num_per_page=100&filter=recent&cursor={cursor}"
             response = requests.get(url)
@@ -49,10 +47,10 @@ def fetch_app_data(app_id, date_filters):
         else:
             print()
     else:
-        days_ago = (datetime.date.today() - datetime.date.fromisoformat(date_filters[0])).days
-        print(days_ago)
+        days_ago = (datetime.date.today() - datetime.date.fromisoformat(date_filters[0])).days; print(days_ago)
+        #
         for i in range(50):
-            url = f"https://store.steampowered.com/appreviews/{app_id}?json=1&num_per_page=100&filter=recent&cursor={cursor}&day_range={days_ago}"
+            url = f"https://store.steampowered.com/appreviews/{app_id}?json=1&num_per_page=100&filter=all&cursor={cursor}&day_range={days_ago}"
             response = requests.get(url)
             review_data = response.json()
             cursor = urllib.parse.quote_plus(review_data["cursor"])
@@ -107,8 +105,7 @@ while not app_id.isdigit():
     print("That is not a whole number. (eg. 1382330) Please try again")
     app_id = input("Enter app id: ")
 
-filter = None
-date_filters = [None, None]
+filter = None; date_filters = [None, None]
 while True:
     print("\nWould you like to filter the reviews between two dates? (y/yes or n/no)")    
     filter = input("Enter:")
@@ -152,8 +149,10 @@ while True:
 app_data = fetch_app_data(app_id, date_filters)
 review_array = organise_reviews(app_data[0], app_data[1])
 
-print("\nSaving data to " + f'{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_{str(app_id)}_Reviews.json')
+print("\nSaving data to " + f'./reviews/{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_{str(app_id)}_Reviews.json')
+cur_path = os.path.dirname(__file__)
 # Dynamic name file in format of 'Year-Month-Day_Hour-Minutes-Seconds_AppID_Reviews.json'
-with open(f'{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_{str(app_id)}_Reviews.json', 'w') as f:
+new_path = os.path.relpath(f'.\\reviews\\{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_{str(app_id)}_Reviews.json', cur_path)
+with open(new_path, 'w') as f:
     json.dump(review_array, f, indent=4)
 print(f"Reviews for the {app_data[1][str(app_id)]['data']['type']} '{app_data[1][str(app_id)]['data']['name']}' (App ID: {app_id}) have been saved.")
