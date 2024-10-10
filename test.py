@@ -1,142 +1,148 @@
+import json
 import unittest
-from unittest.mock import patch, MagicMock
-from datetime import datetime
+import asyncio
+from unittest.mock import patch, AsyncMock
+import datetime
+import hashlib
 import uuid
+
+import aiohttp
 from main import Review, fetch_app_data, organise_reviews
 
+# Sample data for testing
+mock_review_data = {
+    "reviews": [
+        {
+            "author": {"steamid": "123456789", "playtime_at_review": 10},
+            "timestamp_created": 1678886400,  # 2023-03-15
+            "review": "This game is awesome!",
+            "comment_count": 2,
+            "votes_up": 100,
+            "votes_funny": 5,
+            "voted_up": True,
+        }
+    ],
+    "query_summary": {"num_reviews": 1},
+    "cursor": "next_cursor",
+    "success": True,
+}
 
-class TestReviewClass(unittest.TestCase):
+mock_game_data = {
+    "12345": {
+        "success": True,
+        "data": {
+            "name": "Test Game",
+            "developers": ["Test Dev"],
+            "type": "game",
+        },
+    }
+}
+
+
+class TestReview(unittest.IsolatedAsyncioTestCase):
     def test_generate_id(self):
-        # Test the generate_id method
         review = Review(
-            author="author123",
-            date="2023-10-07",
-            hours=100,
-            content="Great game!",
-            comments=5,
+            author="testuser",
+            date="2024-01-01",
+            hours=5,
+            content="Test review",
+            comments=0,
             source="steam",
-            helpful=10,
-            funny=2,
+            helpful=0,
+            funny=0,
             recommend=True,
-            franchise="GameDev",
-            appName="CoolGame",
+            franchise="Test Franchise",
+            appName="Test App",
         )
-        expected_id = review.generate_id("CoolGame", "Great game!", "author123")
-        self.assertEqual(review.id, expected_id)
+        #  Combine review fields and normalise (use the hashed author)
+        id_string = f"{review.appName}-{review.content}-{review.author}".lower() 
+        # Apply SHA-256 hashing
+        hash_object = hashlib.sha256(id_string.encode("utf-8"))
+        expected_id = hash_object.hexdigest()
+        self.assertEqual(review.id, expected_id) 
 
-    def test_review_initialization(self):
-        # Test the initialization of Review objects
-        review = Review(
-            author="author123",
-            date="2023-10-07",
-            hours=100,
-            content="Great game!",
-            comments=5,
-            source="steam",
-            helpful=10,
-            funny=2,
-            recommend=True,
-            franchise="GameDev",
-            appName="CoolGame",
+    @patch("aiohttp.ClientSession.get")
+    async def test_fetch_app_data_success(self, mock_get):
+        mock_response = AsyncMock()
+        mock_response.json = AsyncMock(
+            side_effect=[mock_review_data, mock_game_data]
         )
-        self.assertEqual(
-            review.author, str(uuid.uuid5(uuid.NAMESPACE_DNS, "author123"))
-        )
-        self.assertEqual(review.date, "2023-10-07")
-        self.assertEqual(review.hours, 100)
-        self.assertEqual(review.content, "Great game!")
-        self.assertEqual(review.comments, 5)
-        self.assertTrue(review.recommend)
+        mock_get.return_value.__aenter__.return_value = mock_response
 
+        app_id = 12345
+        review_count = 10
+        reviews, game_data = await fetch_app_data(app_id, review_count)
 
-class TestFetchAppData(unittest.TestCase):
-    @patch("main.requests.get")
-    def test_fetch_app_data_success(self, mock_get):
-        # Mock response for reviews
-        mock_reviews_response = MagicMock()
-        mock_reviews_response.json.return_value = {
-            "query_summary": {"num_reviews": 1},
-            "reviews": [
-                {
-                    "author": {"steamid": "123456", "playtime_at_review": 10},
-                    "timestamp_created": 1633305600,  # Example Unix timestamp
-                    "review": "Good game",
-                    "comment_count": 3,
-                    "votes_up": 10,
-                    "votes_funny": 5,
-                    "voted_up": True,
-                }
-            ],
-            "cursor": "*",
-            "success": True,
-        }
-
-        # Mock response for game info
-        mock_game_response = MagicMock()
-        mock_game_response.json.return_value = {
-            "123456": {
-                "success": True,
-                "data": {"name": "CoolGame", "developers": ["GameDev"], "type": "game"},
-            }
-        }
-
-        # Set the mock side effects (what the mock will return when called)
-        mock_get.side_effect = [mock_reviews_response, mock_game_response]
-
-        # Define input parameters
-        app_id = 123456
-        date_filters = [None, None]
-        numReviews = 1
-
-        # Call the function under test
-        reviews, game_data = fetch_app_data(app_id, date_filters, numReviews)
-
-        # Assertions to verify behavior
         self.assertEqual(len(reviews), 1)
-        self.assertIn("CoolGame", game_data[str(app_id)]["data"]["name"])
-        self.assertTrue(game_data[str(app_id)]["success"])
+        self.assertEqual(game_data, mock_game_data)
 
+    @patch("aiohttp.ClientSession.get")
+    async def test_fetch_app_data_no_reviews(self, mock_get):
+        mock_review_data_copy = mock_review_data.copy()
+        mock_review_data_copy["query_summary"]["num_reviews"] = 0
+        mock_response = AsyncMock()
+        mock_response.json = AsyncMock(
+            side_effect=[mock_review_data_copy, mock_game_data]
+        )
+        mock_get.return_value.__aenter__.return_value = mock_response
 
-class TestOrganiseReviews(unittest.TestCase):
-    def test_organise_reviews(self):
-        # Mock review data structure that matches what organise_reviews expects
-        mock_reviews = [
-            {
-                "reviews": [
-                    {
-                        "author": {"steamid": "123456", "playtime_at_review": 10},
-                        "timestamp_created": 1633305600,  # Example Unix timestamp
-                        "review": "Good game",
-                        "comment_count": 3,
-                        "votes_up": 10,
-                        "votes_funny": 5,
-                        "voted_up": True,
-                    }
-                ]
-            }
-        ]
+        app_id = 12345
+        review_count = 10
+        result = await fetch_app_data(app_id, review_count)
 
-        # Mock game data structure that matches what organise_reviews expects
-        mock_game_data = {
-            "123456": {
-                "data": {"name": "CoolGame", "developers": "GameDev", "type": "game"}
-            }
-        }
+        self.assertEqual(result, "reviews not found")
 
-        # Define the input parameters
-        date_filters = [None, None]  # No date filters applied
-        app_id = 123456  # Example app ID
+    @patch("aiohttp.ClientSession.get")
+    async def test_fetch_app_data_client_error(self, mock_get):
+        mock_response = AsyncMock()
+        mock_response.json = AsyncMock(side_effect=aiohttp.ClientError)
+        mock_get.return_value.__aenter__.return_value = mock_response
 
-        # Call the function under test
-        review_list = organise_reviews(
-            mock_reviews, mock_game_data, date_filters, app_id
+        app_id = 12345
+        review_count = 10
+        result = await fetch_app_data(app_id, review_count)
+
+        self.assertEqual(result, "reviews not found")
+
+    @patch("aiohttp.ClientSession.get")
+    async def test_fetch_app_data_json_error(self, mock_get):
+        mock_response = AsyncMock()
+        mock_response.json = AsyncMock(side_effect=json.JSONDecodeError("", "", 0))
+        mock_get.return_value.__aenter__.return_value = mock_response
+
+        app_id = 12345
+        review_count = 10
+        result = await fetch_app_data(app_id, review_count)
+
+        self.assertEqual(result, "reviews not found")
+
+    async def test_organise_reviews_no_date_filter(self):
+        app_id = 12345
+        date_filters = [None, None]
+        paged_reviews = await organise_reviews(
+            mock_review_data["reviews"], mock_game_data, date_filters, app_id
         )
 
-        # Assert that the review_list is correctly formatted and contains the expected data
-        self.assertEqual(len(review_list), 1)  # One page of reviews
-        self.assertEqual(len(review_list[0]), 1)  # One review in the first page
-        self.assertEqual(review_list[0][0]["content"], "Good game")  # Review content
-        self.assertEqual(review_list[0][0]["appName"], "CoolGame")  # App name
+        self.assertEqual(len(paged_reviews), 1)
+        self.assertEqual(len(paged_reviews[0]), 1)
+        self.assertEqual(paged_reviews[0][0]["appName"], "Test Game")
+
+    async def test_organise_reviews_with_date_filter(self):
+        app_id = 12345
+        date_filters = ["2023-03-10", "2023-03-20"]
+        paged_reviews = await organise_reviews(
+            mock_review_data["reviews"], mock_game_data, date_filters, app_id
+        )
+
+        self.assertEqual(len(paged_reviews), 1)
+        self.assertEqual(len(paged_reviews[0]), 1)
+        self.assertEqual(paged_reviews[0][0]["appName"], "Test Game")
+
+    async def test_organise_reviews_empty(self):
+        app_id = 12345
+        date_filters = [None, None]
+        paged_reviews = await organise_reviews([], mock_game_data, date_filters, app_id)
+        self.assertEqual(paged_reviews, [[]])  # Expect a list containing an empty list
 
 
 if __name__ == "__main__":
